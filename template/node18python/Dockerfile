@@ -1,5 +1,5 @@
 FROM --platform=${TARGETPLATFORM:-linux/amd64} ghcr.io/openfaas/of-watchdog:0.9.15 as watchdog
-FROM --platform=${TARGETPLATFORM:-linux/amd64} node:18-alpine as ship
+FROM --platform=${TARGETPLATFORM:-linux/amd64} node:18-bookworm-slim as ship
 
 ARG TARGETPLATFORM
 ARG BUILDPLATFORM
@@ -7,8 +7,23 @@ ARG BUILDPLATFORM
 COPY --from=watchdog /fwatchdog /usr/bin/fwatchdog
 RUN chmod +x /usr/bin/fwatchdog
 
-RUN apk --no-cache add curl ca-certificates python3 \
-    && addgroup -S app && adduser -S -g app app
+# Install necessary packages
+RUN apt-get update && apt-get install -y \
+    curl \
+    ca-certificates \
+    python3 \
+    python3-pip \
+    python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pre-install these
+# RUN pip3 install torch torchvision torchaudio
+
+# Create app user and group
+RUN groupadd -r app && useradd -r -g app app
+
+# Set correct permissions and create directories before switching to the app user
+RUN mkdir -p /home/app/function && chown -R app:app /home/app
 
 # Turn down the verbosity to default level.
 ENV NPM_CONFIG_LOGLEVEL warn
@@ -16,8 +31,6 @@ ENV NPM_CONFIG_LOGLEVEL warn
 RUN chmod 777 /tmp
 
 USER app
-
-RUN mkdir -p /home/app/function
 
 # Entrypoint
 WORKDIR /home/app
@@ -31,7 +44,6 @@ COPY --chown=app:app index.js ./
 
 # COPY function node packages and install, adding this as a separate
 # entry allows caching of npm install
-
 WORKDIR /home/app/function
 COPY --chown=app:app function/*.json ./
 
@@ -60,3 +72,4 @@ ENV prefix_logs="false"
 HEALTHCHECK --interval=3s CMD [ -e /tmp/.lock ] || exit 1
 
 CMD ["fwatchdog"]
+
